@@ -16,11 +16,16 @@ pub(super) fn draw<B: Backend>(
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(0), Constraint::Length(1)])
         .split(frame.size());
+    let timestamp_width = result
+        .max_timestamp_length()
+        .max("Timestamp".len())
+        .saturating_add(2)
+        .min(usize::from(rows[0].width / 2)) as u16;
     let columns = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Length(21),
-            Constraint::Length(rows[0].width.saturating_sub(21) / 2),
+            Constraint::Length(timestamp_width),
+            Constraint::Length(rows[0].width.saturating_sub(timestamp_width) / 2),
             Constraint::Min(0),
         ])
         .split(rows[0]);
@@ -28,17 +33,14 @@ pub(super) fn draw<B: Backend>(
     let mut left_text = String::new();
     let mut right_text = String::new();
 
-    for (left, right) in result
+    for ((left, right), timestamp) in result
         .left_container()
         .iter()
         .zip(result.right_container())
+        .zip(result.timestamps())
         .skip(offset)
         .take(usize::from(rows[0].height.saturating_sub(2)))
     {
-        // Log messages start with a 19-byte timestamp; missing entries are "\n".
-        let timestamp = left.get(..19).or_else(|| right.get(..19)).unwrap_or("");
-        let left = left.get(19..).unwrap_or("").trim_start();
-        let right = right.get(19..).unwrap_or("").trim_start();
         let height = left.lines().count().max(right.lines().count()).max(1);
 
         // Pad multiline entries so the next pair starts on the same screen row.
@@ -85,11 +87,9 @@ mod tests {
     #[test]
     fn renders_aligned_columns_and_scrolls() {
         let result = CompareResult::new(
-            vec!["2026-09-12 00:00:01 left\ncontinued".into(), "\n".into()],
-            vec![
-                "2026-09-12 00:00:01 right".into(),
-                "2026-09-12 00:00:02 only-right".into(),
-            ],
+            vec!["left\ncontinued".into(), "\n".into()],
+            vec!["right".into(), "only-right".into()],
+            vec!["2026-09-12 00:00:01".into(), "2026-09-12 00:00:02".into()],
         )
         .unwrap();
         let mut terminal = Terminal::new(TestBackend::new(100, 10)).unwrap();
@@ -111,7 +111,7 @@ mod tests {
 
     #[test]
     fn renders_empty_results_in_small_terminals() {
-        let result = CompareResult::new(vec![], vec![]).unwrap();
+        let result = CompareResult::new(vec![], vec![], vec![]).unwrap();
         for (width, height) in [(0, 0), (10, 3), (40, 10)] {
             let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
             terminal.draw(|frame| draw(frame, &result, 0, 0)).unwrap();
@@ -121,8 +121,9 @@ mod tests {
     #[test]
     fn horizontal_scroll_moves_both_messages_but_not_timestamps() {
         let result = CompareResult::new(
-            vec!["2026-09-12 00:00:01 abcdef\n123456".into()],
-            vec!["2026-09-12 00:00:01 ghijkl".into()],
+            vec!["abcdef\n123456".into()],
+            vec!["ghijkl".into()],
+            vec!["2026-09-12 00:00:01".into()],
         )
         .unwrap();
         let mut terminal = Terminal::new(TestBackend::new(100, 10)).unwrap();
@@ -134,5 +135,40 @@ mod tests {
         assert_eq!(buffer.get(22, 2).symbol, "4");
         assert_eq!(buffer.get(61, 1).symbol, "j");
         assert_eq!(buffer.get(61, 2).symbol, " ");
+    }
+
+    #[test]
+    fn renders_variable_length_timestamps_and_caps_width() {
+        let timestamps = vec![
+            "2026-09-12 00:00:01 UTC".to_owned(),
+            "2026-09-12 00:00:02.123456789 UTC".to_owned(),
+        ];
+        let result = CompareResult::new(
+            vec!["left".into(), "  indented".into()],
+            vec!["right".into(), "\n".into()],
+            timestamps.clone(),
+        )
+        .unwrap();
+        let mut terminal = Terminal::new(TestBackend::new(100, 10)).unwrap();
+        terminal.draw(|frame| draw(frame, &result, 0, 0)).unwrap();
+        let buffer = terminal.backend().buffer();
+        for (row, timestamp) in timestamps.iter().enumerate() {
+            for (column, character) in timestamp.chars().enumerate() {
+                assert_eq!(
+                    buffer.get(column as u16 + 1, row as u16 + 1).symbol,
+                    character.to_string()
+                );
+            }
+        }
+        let left_start = timestamps[1].chars().count() as u16 + 3;
+        assert_eq!(buffer.get(left_start, 1).symbol, "l");
+        assert_eq!(buffer.get(left_start, 2).symbol, " ");
+        assert_eq!(buffer.get(left_start + 2, 2).symbol, "i");
+
+        let mut terminal = Terminal::new(TestBackend::new(40, 6)).unwrap();
+        terminal.draw(|frame| draw(frame, &result, 0, 0)).unwrap();
+        let buffer = terminal.backend().buffer();
+        assert_eq!(buffer.get(21, 1).symbol, "l");
+        assert_eq!(buffer.get(31, 1).symbol, "r");
     }
 }

@@ -5,13 +5,7 @@ timestamp. Built with [tui-rs](https://github.com/fdehau/tui-rs) and
 [Crossterm](https://github.com/crossterm-rs/crossterm), with a deliberately simple
 codebase for learning.
 
-```text
-Timestamp           | Left                  | Right
-2026-09-12 10:00:00 | INFO starting         | INFO starting
-2026-09-12 10:00:01 | WARNING retrying      |
-2026-09-12 10:00:02 |                       | INFO connected
-2026-09-12 10:00:03 | INFO ready            | ERROR failed
-```
+![logsync displaying two logs side by side with UTC timestamps, unmatched entries, and multiline errors](assets/image.png)
 
 ## Run
 
@@ -49,27 +43,90 @@ touchpad support depends on the terminal forwarding the appropriate events.
 
 ## Log Format
 
-Both files must be UTF-8 and already sorted by timestamp. Each entry starts with
-a timestamp in `YYYY-MM-DD HH:MM:SS` format:
+Both files must be UTF-8 and already sorted by timestamp (after UTC normalization).
+The default selector detects a supported timestamp at the start of each line,
+optionally surrounded by square brackets. For example:
 
 ```text
 2026-09-12 10:00:00 INFO starting
-2026-09-12 10:00:01 ERROR request failed
+[2026-09-12T10:00:01.123Z] ERROR request failed
     RuntimeError: connection refused
 2026-09-12 10:00:02 INFO retrying
 ```
 
+| Format | Example |
+| --- | --- |
+| Year-first date and time | `2026-09-12 10:00:00` |
+| Slash or dot date separators | `2026/09/12 10:00:00`, `2026.09.12 10:00:00` |
+| ISO 8601 / RFC 3339 | `2026-09-12T12:00:00.123456789+02:00` |
+| Comma fractions | `2026-09-12 10:00:00,123` |
+| Explicit UTC or numeric offset | `2026-09-12 10:00:00 UTC`, `2026-09-12 12:00:00 +0200` |
+| RFC 2822 | `Sat, 12 Sep 2026 10:00:00 +0000` |
+| Apache timestamp | `[12/Sep/2026:12:00:00 +0200]` |
+| Unix seconds / milliseconds / microseconds / nanoseconds | `1700000000`, `1700000000123`, `1700000000123456`, `1700000000123456789` |
+
+- Detection runs per entry, so files can use different formats or mix supported
+  formats. Timestamp and message must be separated by whitespace; a timestamp
+  can also occupy the whole line. Leading whitespace is accepted.
+- Explicit time zones are normalized to UTC for comparison and display.
+  **Timestamps without a time zone are assumed to be UTC**, not machine-local time.
+- Fractional seconds are preserved up to nanosecond precision. Entries at
+  `.100` and `.200` are distinct; equivalent instants with different offsets align.
+- Epoch units are inferred from 10, 13, 16, or 19 digits (an optional minus sign
+  is not counted). Other digit lengths are not auto-detected.
+- Ambiguous dates such as `01/02/2026`, time-only values, missing-year syslog
+  timestamps, named zones such as `EST`, arbitrary prefixes, and other formats
+  need a custom selector. This is detection of supported formats, not a parser
+  for every possible date notation.
 - Lines without a recognized timestamp attach to the previous entry, supporting
   multiline messages and tracebacks. Lines before the first entry are ignored.
 - Entries with equal timestamps are paired in encounter order. Unmatched entries
   leave a blank on the other side.
-- Matching uses only the first 19 timestamp characters, with second precision.
-  Fractional seconds and time zones are not part of the comparison key.
 - ANSI escape sequences are stripped before parsing. Colored logs display as
   plain text; tabs become four spaces. Original files are not modified.
 
 This is a timestamp-aligned viewer, not a message diff: different messages at
 the same timestamp are shown together without difference highlighting.
+
+## Custom Selectors
+
+`LogFile<S>` is generic over `TimestampSelector`, defaulting to
+`AutoTimestampSelector`. The CLI uses the default automatically:
+
+```rust
+let log = LogFile::from_file(path);
+```
+
+To support another layout, implement the trait inside the app and supply an
+instance to `LogFile::from_file_with_selector(path, selector)`. A selector receives
+a sanitized line and returns a UTC timestamp and a borrowed message body, or
+`None` for a continuation line. It can maintain state through `&mut self`.
+
+```rust
+use chrono::{DateTime, Utc};
+use crate::domain::{LogFile, SelectedTimestamp, TimestampSelector};
+
+struct TaggedTimestampSelector;
+
+impl TimestampSelector for TaggedTimestampSelector {
+    fn select<'a>(&mut self, line: &'a str) -> Option<SelectedTimestamp<'a>> {
+        // Example: time=2026-09-12T10:00:00Z|INFO starting
+        let (timestamp, message) = line.strip_prefix("time=")?.split_once('|')?;
+        Some(SelectedTimestamp {
+            timestamp: DateTime::parse_from_rfc3339(timestamp).ok()?.with_timezone(&Utc),
+            message,
+        })
+    }
+}
+
+// In a function:
+// let log = LogFile::from_file_with_selector(path, TaggedTimestampSelector);
+```
+
+The two logs may use different selector types. `LogEntry` stores the parsed
+timestamp separately from its message body; `CompareResult` validates equal
+lengths for both message columns and the timestamp column. The renderer does
+not parse timestamp strings.
 
 ## Limitations
 
@@ -92,6 +149,7 @@ src/
     compare.rs                 Comparison-key trait
     compare_result.rs          Validated, read-only aligned columns
     logfile.rs                 Log loading and parsing
+    timestamp_selector.rs      Selector trait and automatic format detection
   tui/
     mod.rs                     Terminal setup, events, and cleanup
     render.rs                  Three-column layout and drawing

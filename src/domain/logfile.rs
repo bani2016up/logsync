@@ -1,18 +1,17 @@
 use crate::domain::compare::Compare;
-use chrono::NaiveDateTime;
+use crate::domain::{AutoTimestampSelector, SelectedTimestamp, TimestampSelector};
+use chrono::{DateTime, Utc};
 use std::fs;
 
-const TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S";
-const TIMESTAMP_LEN: usize = 19;
-
 pub struct LogEntry {
-    pub(crate) timestamp: NaiveDateTime,
+    pub(crate) timestamp: DateTime<Utc>,
     message: String,
 }
 
-pub struct LogFile {
+pub(crate) struct LogFile<S: TimestampSelector = AutoTimestampSelector> {
     path: String,
     pub(crate) entities: Vec<LogEntry>,
+    _selector: S,
 }
 
 impl LogEntry {
@@ -21,35 +20,35 @@ impl LogEntry {
     }
 }
 
-impl LogFile {
-    pub fn new() -> Self {
-        LogFile {
-            path: String::from("asdasd"),
-            entities: Vec::new(),
-        }
-    }
-
+impl LogFile<AutoTimestampSelector> {
     pub fn from_file(path: String) -> Self {
-        let source = fs::read_to_string(&path).expect("Should have been able to read the file");
-        Self::from_source(path, &source)
+        Self::from_file_with_selector(path, AutoTimestampSelector)
     }
 
+    #[cfg(test)]
     fn from_source(path: String, source: &str) -> Self {
+        Self::from_source_with_selector(path, source, AutoTimestampSelector)
+    }
+}
+
+impl<S: TimestampSelector> LogFile<S> {
+    pub fn from_file_with_selector(path: String, selector: S) -> Self {
+        let source = fs::read_to_string(&path).expect("Should have been able to read the file");
+        Self::from_source_with_selector(path, &source, selector)
+    }
+
+    fn from_source_with_selector(path: String, source: &str, mut selector: S) -> Self {
         // Strip terminal commands before parsing timestamps or displaying messages.
         let mut source = strip_ansi_escapes::strip_str(&source.replace('\t', "    "));
         source.retain(|c| !c.is_control() || c == '\n');
         let mut entities: Vec<LogEntry> = Vec::new();
 
         for line in source.lines() {
-            let timestamp = line
-                .get(..TIMESTAMP_LEN)
-                .and_then(|s| NaiveDateTime::parse_from_str(s, TIMESTAMP_FORMAT).ok());
-
-            match timestamp {
-                Some(timestamp) => {
+            match selector.select(line) {
+                Some(SelectedTimestamp { timestamp, message }) => {
                     entities.push(LogEntry {
                         timestamp,
-                        message: line.to_string(),
+                        message: message.to_owned(),
                     });
                 }
 
@@ -62,12 +61,16 @@ impl LogFile {
             }
         }
 
-        LogFile { path, entities }
+        LogFile {
+            path,
+            entities,
+            _selector: selector,
+        }
     }
 }
 
-impl Compare<NaiveDateTime> for LogEntry {
-    fn key(&self) -> NaiveDateTime {
+impl Compare<DateTime<Utc>> for LogEntry {
+    fn key(&self) -> DateTime<Utc> {
         self.timestamp
     }
 }
@@ -76,6 +79,55 @@ impl Compare<NaiveDateTime> for LogEntry {
 mod tests {
     use super::*;
     use crate::application::compare_logfiles::compare_logfiles;
+
+    #[test]
+    fn compares_different_formats_and_keeps_subsecond_entries_distinct() {
+        let left = LogFile::from_source(
+            String::new(),
+            "2026-09-12 10:00:00.100 left\n2026-09-12 10:00:00.200 extra",
+        );
+        let right = LogFile::from_source(
+            String::new(),
+            "[2026-09-12T12:00:00.100+02:00] right\n2026/09/12 10:00:01 later",
+        );
+        let result = compare_logfiles(&left, &right);
+        assert_eq!(result.left_container(), ["left", "extra", "\n"]);
+        assert_eq!(result.right_container(), ["right", "\n", "later"]);
+        assert_eq!(
+            result.timestamps(),
+            [
+                "2026-09-12 10:00:00.100 UTC",
+                "2026-09-12 10:00:00.200 UTC",
+                "2026-09-12 10:00:01 UTC",
+            ]
+        );
+    }
+
+    #[test]
+    fn accepts_a_custom_selector_independently_for_each_log() {
+        struct CustomSelector;
+        impl TimestampSelector for CustomSelector {
+            fn select<'a>(&mut self, line: &'a str) -> Option<SelectedTimestamp<'a>> {
+                let (timestamp, message) = line.strip_prefix("time=")?.split_once('|')?;
+                Some(SelectedTimestamp {
+                    timestamp: DateTime::parse_from_rfc3339(timestamp)
+                        .ok()?
+                        .with_timezone(&Utc),
+                    message,
+                })
+            }
+        }
+        let left = LogFile::from_source_with_selector(
+            String::new(),
+            "time=2026-09-12T10:00:00Z|custom",
+            CustomSelector,
+        );
+        let right = LogFile::from_source(String::new(), "2026-09-12 10:00:00 automatic");
+        let result = compare_logfiles(&left, &right);
+        assert_eq!(result.length(), 1);
+        assert_eq!(result.left_container(), ["custom"]);
+        assert_eq!(result.right_container(), ["automatic"]);
+    }
 
     #[test]
     fn colored_logs_parse_and_compare_like_plain_text() {
@@ -97,23 +149,21 @@ mod tests {
         let log = LogFile::from_source(String::new(), source);
 
         assert_eq!(log.entities.len(), 1);
-        assert_eq!(
-            log.entities[0].get_log_message(),
-            "2026-09-12 00:00:01 INFO link \u{00e9}"
-        );
+        assert_eq!(log.entities[0].get_log_message(), "INFO link \u{00e9}");
     }
 
     fn logfile(seconds: &[u32], label: &str) -> LogFile {
         LogFile {
             path: String::new(),
+            _selector: AutoTimestampSelector,
             entities: seconds
                 .iter()
                 .map(|second| LogEntry {
-                    timestamp: NaiveDateTime::parse_from_str(
-                        &format!("2026-09-12 00:00:{second:02}"),
-                        TIMESTAMP_FORMAT,
-                    )
-                    .unwrap(),
+                    timestamp: DateTime::parse_from_rfc3339(&format!(
+                        "2026-09-12T00:00:{second:02}Z"
+                    ))
+                    .unwrap()
+                    .with_timezone(&Utc),
                     message: format!("{label}{second}"),
                 })
                 .collect(),
