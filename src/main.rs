@@ -1,10 +1,6 @@
-mod application;
-mod domain;
-mod tui;
-
-use crate::application::compare_logfiles::compare_logfiles;
-use crate::domain::LogFile;
-use crate::tui::start;
+use logsync::application::compare_logfiles;
+use logsync::domain::LogFile;
+use logsync::tui::start;
 
 fn main() -> std::io::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();

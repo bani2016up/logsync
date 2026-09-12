@@ -1,0 +1,5 @@
+2026.09.12 10:00:01 DEBUG scheduled task
+2026-09-12 10:00:03,000 INFO fallback response
+2026-09-12 10:00:04 PANIC storage unavailable
+    at storage.rs:42
+2026-09-12 10:00:07 TRACE cleanup finished

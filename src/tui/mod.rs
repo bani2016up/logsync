@@ -14,7 +14,7 @@ use state::State;
 use std::io;
 use tui::{Terminal, backend::CrosstermBackend};
 
-pub(crate) fn start(result: &CompareResult) -> io::Result<()> {
+pub fn start(result: &CompareResult) -> io::Result<()> {
     let backend = CrosstermBackend::new(io::stdout());
     let mut terminal = Terminal::new(backend)?;
     enable_raw_mode()?;
@@ -71,4 +71,43 @@ pub(crate) fn start(result: &CompareResult) -> io::Result<()> {
         .and(mouse_result)
         .and(screen_result)
         .and(cursor_result)
+}
+
+/// Renders the application to a deterministic textual representation for end-to-end tests.
+pub fn snapshot(result: &CompareResult, width: u16, height: u16) -> String {
+    use tui::{Terminal, backend::TestBackend, style::Color};
+
+    let mut terminal =
+        Terminal::new(TestBackend::new(width, height)).expect("test backend is valid");
+    terminal
+        .draw(|frame| render::draw(frame, result, 0, 0))
+        .expect("test backend renders");
+
+    terminal
+        .backend()
+        .buffer()
+        .content
+        .chunks_exact(usize::from(width))
+        .map(|row| {
+            let mut previous_color = Color::Reset;
+            let mut snapshot = String::new();
+            for cell in row {
+                if cell.fg != previous_color {
+                    snapshot.push_str(match cell.fg {
+                        Color::Reset => "{/}",
+                        Color::Red => "{red}",
+                        Color::Yellow => "{yellow}",
+                        Color::Green => "{green}",
+                        Color::Blue => "{blue}",
+                        Color::DarkGray => "{gray}",
+                        _ => "{color}",
+                    });
+                    previous_color = cell.fg;
+                }
+                snapshot.push_str(&cell.symbol);
+            }
+            snapshot.trim_end().to_owned()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }

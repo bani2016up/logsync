@@ -5,7 +5,23 @@ timestamp. Built with [tui-rs](https://github.com/fdehau/tui-rs) and
 [Crossterm](https://github.com/crossterm-rs/crossterm), with a deliberately simple
 codebase for learning.
 
-![logsync displaying three logs side by side with UTC timestamps and unmatched entries](assets/image.png)
+Example output for the versioned fixtures in `assets/`:
+
+```text
+┌Timestamp──────────────┐┌Log 1────────────────────────────────┐┌Log 2───────────────────────────────┐┌Log 3───────────────────────────────┐
+│2026-09-12 10:00:00 UTC││INFO gateway started                 ││INFO worker ready                    ││                                    │
+│2026-09-12 10:00:01 UTC││DEBUG cache miss for user-42         ││                                    ││DEBUG scheduled task                │
+│2026-09-12 10:00:02 UTC││                                     ││WARNING queue depth high             ││                                    │
+│2026-09-12 10:00:03 UTC││WARN retrying upstream request       ││FATAL worker stopped                 ││INFO fallback response              │
+│2026-09-12 10:00:04 UTC││                                     ││                                    ││PANIC storage unavailable           │
+│                       ││                                     ││                                    ││    at storage.rs:42                │
+│2026-09-12 10:00:05 UTC││ERROR request failed                 ││                                    ││                                    │
+│                       ││    RuntimeError: connection refused ││                                    ││                                    │
+└───────────────────────┘└─────────────────────────────────────┘└────────────────────────────────────┘└────────────────────────────────────┘
+```
+
+Log levels are colorized in the terminal; the integration snapshot verifies this
+output and its colors.
 
 ## Run
 
@@ -27,8 +43,8 @@ logsync /path/to/first.log /path/to/second.log /path/to/third.log
 
 Pass two or more file paths. Each file gets a column labeled `Log 1`, `Log 2`,
 `Log 3`, and so on, in argument order. Two-file comparisons still work.
-There are currently no command-line flags. The screenshot above shows a
-three-log comparison.
+There are currently no command-line flags. The example above shows a three-log
+comparison.
 
 ## Controls
 
@@ -88,8 +104,10 @@ optionally surrounded by square brackets. For example:
   Duplicate timestamps are paired in encounter order, one entry per file per row.
 - Multiline rows are padded to the tallest entry across all files so the next
   entries remain aligned. Empty files keep their own blank columns.
-- ANSI escape sequences are stripped before parsing. Colored logs display as
-  plain text; tabs become four spaces. Original files are not modified.
+- ANSI escape sequences are stripped before parsing. Tabs become four spaces.
+  The viewer colors `ERROR`, `FATAL`, and `PANIC` red; `WARN` and `WARNING`
+  yellow; `INFO` green; `DEBUG` blue; and `TRACE` gray. Original files are not
+  modified.
 
 This is a timestamp-aligned viewer, not a message diff: different messages at
 the same timestamp are shown together without difference highlighting.
@@ -187,8 +205,11 @@ cargo test --locked
 ```
 
 Tests cover parsing colored logs, alignment, result invariants, scrolling, and
-rendering through tui-rs's in-memory test backend. Local `*.log` files, `.env`
-files, and build output are ignored by Git. Do not submit private logs or secrets.
+rendering through tui-rs's in-memory test backend. The integration snapshot
+loads the three versioned `assets/integration-log-*.log` fixtures and verifies
+the complete rendered table and its colors. Local `*.log` files outside
+`assets/`, `.env` files, and build output are ignored by Git. Do not submit
+private logs or secrets.
 
 ## License
 

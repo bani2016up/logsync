@@ -1,6 +1,6 @@
 /// Aligned log messages with equal-length columns and newline placeholders.
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) struct CompareResult {
+pub struct CompareResult {
     containers: Vec<Vec<String>>,
     timestamps: Vec<String>,
     length: usize,

@@ -2,17 +2,17 @@ use chrono::{DateTime, NaiveDateTime, Utc};
 use regex::Regex;
 use std::sync::LazyLock;
 
-pub(crate) struct SelectedTimestamp<'a> {
-    pub(crate) timestamp: DateTime<Utc>,
-    pub(crate) message: &'a str,
+pub struct SelectedTimestamp<'a> {
+    pub timestamp: DateTime<Utc>,
+    pub message: &'a str,
 }
 
-pub(crate) trait TimestampSelector {
+pub trait TimestampSelector {
     fn select<'a>(&mut self, line: &'a str) -> Option<SelectedTimestamp<'a>>;
 }
 
 #[derive(Default)]
-pub(crate) struct AutoTimestampSelector;
+pub struct AutoTimestampSelector;
 
 impl TimestampSelector for AutoTimestampSelector {
     fn select<'a>(&mut self, line: &'a str) -> Option<SelectedTimestamp<'a>> {

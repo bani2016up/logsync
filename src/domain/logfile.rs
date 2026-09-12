@@ -8,8 +8,8 @@ pub struct LogEntry {
     message: String,
 }
 
-pub(crate) struct LogFile<S: TimestampSelector = AutoTimestampSelector> {
-    path: String,
+pub struct LogFile<S: TimestampSelector = AutoTimestampSelector> {
+    _path: String,
     pub(crate) entities: Vec<LogEntry>,
     _selector: S,
 }
@@ -68,7 +68,7 @@ impl<S: TimestampSelector> LogFile<S> {
         }
 
         LogFile {
-            path,
+            _path: path,
             entities,
             _selector: selector,
         }
@@ -84,7 +84,7 @@ impl Compare<DateTime<Utc>> for LogEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::application::compare_logfiles::compare_logfiles;
+    use crate::application::compare_logfiles;
 
     #[test]
     fn compares_different_formats_and_keeps_subsecond_entries_distinct() {
@@ -160,7 +160,7 @@ mod tests {
 
     fn logfile(seconds: &[u32], label: &str) -> LogFile {
         LogFile {
-            path: String::new(),
+            _path: String::new(),
             _selector: AutoTimestampSelector,
             entities: seconds
                 .iter()

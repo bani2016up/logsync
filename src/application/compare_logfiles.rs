@@ -1,7 +1,7 @@
 use crate::domain::{Compare, CompareResult, LogEntry};
 
 /// Aligns sorted logs, pairing duplicate timestamps in encounter order.
-pub(crate) fn compare_logfiles(logfiles: Vec<impl AsRef<[LogEntry]>>) -> CompareResult {
+pub fn compare_logfiles(logfiles: Vec<impl AsRef<[LogEntry]>>) -> CompareResult {
     let mut containers = vec![Vec::new(); logfiles.len()];
     let mut timestamps = Vec::new();
     let mut entries: Vec<_> = logfiles

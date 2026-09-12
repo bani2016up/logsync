@@ -3,6 +3,8 @@ use tui::{
     Frame,
     backend::Backend,
     layout::{Constraint, Direction, Layout},
+    style::{Color, Style},
+    text::{Span, Spans, Text},
     widgets::{Block, Borders, Paragraph},
 };
 
@@ -40,7 +42,7 @@ pub(super) fn draw<B: Backend>(
         .constraints(constraints)
         .split(rows[0]);
     let mut timestamps = String::new();
-    let mut texts = vec![String::new(); visible_count];
+    let mut texts = vec![Vec::<Spans>::new(); visible_count];
 
     for (index, timestamp) in result
         .timestamps()
@@ -62,8 +64,8 @@ pub(super) fn draw<B: Backend>(
         for (text, container) in texts.iter_mut().zip(containers) {
             let mut lines = container[index].lines();
             for _ in 0..height {
-                text.push_str(lines.next().unwrap_or(""));
-                text.push('\n');
+                let line = lines.next().unwrap_or("");
+                text.push(Spans::from(Span::styled(line, log_style(line))));
             }
         }
     }
@@ -74,11 +76,13 @@ pub(super) fn draw<B: Backend>(
     );
     for (index, (text, area)) in texts.into_iter().zip(columns.iter().skip(1)).enumerate() {
         frame.render_widget(
-            Paragraph::new(text).scroll((0, horizontal_offset)).block(
-                Block::default()
-                    .title(format!("Log {}", index + 1))
-                    .borders(Borders::ALL),
-            ),
+            Paragraph::new(Text::from(text))
+                .scroll((0, horizontal_offset))
+                .block(
+                    Block::default()
+                        .title(format!("Log {}", index + 1))
+                        .borders(Borders::ALL),
+                ),
             *area,
         );
     }
@@ -88,6 +92,30 @@ pub(super) fn draw<B: Backend>(
         "Up/Down: vertical | Left/Right: horizontal | q / Esc: quit"
     };
     frame.render_widget(Paragraph::new(help), rows[1]);
+}
+
+fn log_style(line: &str) -> Style {
+    let color = if has_level(line, "ERROR") || has_level(line, "FATAL") || has_level(line, "PANIC")
+    {
+        Color::Red
+    } else if has_level(line, "WARN") || has_level(line, "WARNING") {
+        Color::Yellow
+    } else if has_level(line, "INFO") {
+        Color::Green
+    } else if has_level(line, "DEBUG") {
+        Color::Blue
+    } else if has_level(line, "TRACE") {
+        Color::DarkGray
+    } else {
+        return Style::default();
+    };
+
+    Style::default().fg(color)
+}
+
+fn has_level(line: &str, level: &str) -> bool {
+    line.split(|character: char| !character.is_ascii_alphanumeric())
+        .any(|word| word.eq_ignore_ascii_case(level))
 }
 
 #[cfg(test)]

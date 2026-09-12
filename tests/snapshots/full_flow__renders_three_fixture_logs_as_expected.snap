@@ -1,0 +1,20 @@
+---
+source: tests/full_flow.rs
+expression: "tui::snapshot(&result, 140, 16)"
+---
+┌Timestamp──────────────┐┌Log 1────────────────────────────────┐┌Log 2───────────────────────────────┐┌Log 3───────────────────────────────┐
+│2026-09-12 10:00:00 UTC││{green}INFO gateway started{/}                 ││{green}INFO worker ready{/}                   ││                                    │
+│2026-09-12 10:00:01 UTC││{blue}DEBUG cache miss for user-42{/}         ││                                    ││{blue}DEBUG scheduled task{/}                │
+│2026-09-12 10:00:02 UTC││                                     ││{yellow}WARNING queue depth high{/}            ││                                    │
+│2026-09-12 10:00:03 UTC││{yellow}WARN retrying upstream request{/}       ││{red}FATAL worker stopped{/}                ││{green}INFO fallback response{/}              │
+│2026-09-12 10:00:04 UTC││                                     ││                                    ││{red}PANIC storage unavailable{/}           │
+│                       ││                                     ││                                    ││    at storage.rs:42                │
+│2026-09-12 10:00:05 UTC││{red}ERROR request failed{/}                 ││                                    ││                                    │
+│                       ││    RuntimeError: connection refused ││                                    ││                                    │
+│2026-09-12 10:00:07 UTC││{gray}TRACE shutdown hook complete{/}         ││                                    ││{gray}TRACE cleanup finished{/}              │
+│                       ││                                     ││                                    ││                                    │
+│                       ││                                     ││                                    ││                                    │
+│                       ││                                     ││                                    ││                                    │
+│                       ││                                     ││                                    ││                                    │
+└───────────────────────┘└─────────────────────────────────────┘└────────────────────────────────────┘└────────────────────────────────────┘
+Up/Down: vertical | Left/Right: horizontal | q / Esc: quit

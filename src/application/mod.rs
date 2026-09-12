@@ -1,1 +1,3 @@
-pub(crate) mod compare_logfiles;
+mod compare_logfiles;
+
+pub use compare_logfiles::compare_logfiles;
