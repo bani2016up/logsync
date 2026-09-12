@@ -1,8 +1,7 @@
 /// Aligned log messages with equal-length columns and newline placeholders.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct CompareResult {
-    left_container: Vec<String>,
-    right_container: Vec<String>,
+    containers: Vec<Vec<String>>,
     timestamps: Vec<String>,
     length: usize,
     max_timestamp_length: usize,
@@ -10,35 +9,40 @@ pub(crate) struct CompareResult {
 
 impl CompareResult {
     pub(crate) fn new(
-        left_container: Vec<String>,
-        right_container: Vec<String>,
+        containers: Vec<Vec<String>>,
         timestamps: Vec<String>,
-    ) -> Result<Self, &'static str> {
-        let length = left_container.len();
-        if length != right_container.len() || length != timestamps.len() {
-            return Err("comparison columns must have the same length");
+    ) -> Result<Self, String> {
+        let length = containers.first().map_or(0, Vec::len);
+        for (index, container) in containers.iter().enumerate() {
+            if container.len() != length {
+                return Err(format!(
+                    "Container {index} has length {}, expected {length}",
+                    container.len()
+                ));
+            }
         }
-
+        if timestamps.len() != length {
+            return Err(format!(
+                "Timestamp column has length {}, expected {length}",
+                timestamps.len()
+            ));
+        }
         let max_timestamp_length = timestamps
             .iter()
             .map(|text| text.chars().count())
             .max()
             .unwrap_or(0);
+
         Ok(Self {
-            left_container,
-            right_container,
+            containers,
             timestamps,
             length,
             max_timestamp_length,
         })
     }
 
-    pub(crate) fn left_container(&self) -> &[String] {
-        &self.left_container
-    }
-
-    pub(crate) fn right_container(&self) -> &[String] {
-        &self.right_container
+    pub(crate) fn containers(&self) -> &[Vec<String>] {
+        &self.containers
     }
 
     pub(crate) fn length(&self) -> usize {
@@ -61,14 +65,18 @@ mod tests {
     #[test]
     fn stores_equal_length_columns_and_computes_length() {
         let result = CompareResult::new(
-            vec!["left".into()],
-            vec!["right".into()],
+            vec![
+                vec!["first".into()],
+                vec!["second".into()],
+                vec!["third".into()],
+            ],
             vec!["timestamp".into()],
         )
         .unwrap();
 
-        assert_eq!(result.left_container(), ["left"]);
-        assert_eq!(result.right_container(), ["right"]);
+        assert_eq!(result.containers()[0], ["first"]);
+        assert_eq!(result.containers()[1], ["second"]);
+        assert_eq!(result.containers()[2], ["third"]);
         assert_eq!(result.timestamps(), ["timestamp"]);
         assert_eq!(result.length(), 1);
         assert_eq!(result.max_timestamp_length(), 9);
@@ -76,23 +84,25 @@ mod tests {
 
     #[test]
     fn accepts_empty_columns() {
-        let result = CompareResult::new(vec![], vec![], vec![]).unwrap();
-
-        assert!(result.left_container().is_empty());
-        assert!(result.right_container().is_empty());
-        assert!(result.timestamps().is_empty());
-        assert_eq!(result.length(), 0);
-        assert_eq!(result.max_timestamp_length(), 0);
+        for count in [0, 1, 2, 4] {
+            let result = CompareResult::new(vec![vec![]; count], vec![]).unwrap();
+            assert_eq!(result.containers().len(), count);
+            assert!(result.containers().iter().all(Vec::is_empty));
+            assert!(result.timestamps().is_empty());
+            assert_eq!(result.length(), 0);
+            assert_eq!(result.max_timestamp_length(), 0);
+        }
     }
 
     #[test]
     fn rejects_mismatched_lengths() {
-        for (left, right) in [
-            (vec!["left".into()], vec![]),
-            (vec![], vec!["right".into()]),
-            (vec!["left".into()], vec!["right".into(), "extra".into()]),
+        for containers in [
+            vec![vec!["first".into()], vec![]],
+            vec![vec![], vec!["second".into()]],
+            vec![vec!["first".into()], vec!["second".into()], vec![]],
+            vec![vec!["first".into()], vec!["second".into(), "extra".into()]],
         ] {
-            assert!(CompareResult::new(left, right, vec!["timestamp".into()]).is_err());
+            assert!(CompareResult::new(containers, vec!["timestamp".into()]).is_err());
         }
     }
 
@@ -100,8 +110,13 @@ mod tests {
     fn rejects_mismatched_timestamps() {
         for timestamps in [vec![], vec!["first".into(), "second".into()]] {
             assert!(
-                CompareResult::new(vec!["left".into()], vec!["right".into()], timestamps).is_err()
+                CompareResult::new(
+                    vec![vec!["first".into()], vec!["second".into()]],
+                    timestamps
+                )
+                .is_err()
             );
         }
+        assert!(CompareResult::new(vec![], vec!["timestamp".into()]).is_err());
     }
 }

@@ -1,50 +1,31 @@
-use crate::domain::{Compare, CompareResult, LogFile, TimestampSelector};
+use crate::domain::{Compare, CompareResult, LogEntry};
 
-/// Aligns logs sorted by timestamp, using a newline for missing entries.
-pub(crate) fn compare_logfiles<L: TimestampSelector, R: TimestampSelector>(
-    logfile1: &LogFile<L>,
-    logfile2: &LogFile<R>,
-) -> CompareResult {
-    let mut left_container = Vec::new();
-    let mut right_container = Vec::new();
-    let mut timestamps: Vec<String> = Vec::new();
-    let mut left = logfile1.entities.iter().peekable();
-    let mut right = logfile2.entities.iter().peekable();
+/// Aligns sorted logs, pairing duplicate timestamps in encounter order.
+pub(crate) fn compare_logfiles(logfiles: Vec<impl AsRef<[LogEntry]>>) -> CompareResult {
+    let mut containers = vec![Vec::new(); logfiles.len()];
+    let mut timestamps = Vec::new();
+    let mut entries: Vec<_> = logfiles
+        .iter()
+        .map(|file| file.as_ref().iter().peekable())
+        .collect();
 
-    loop {
-        let (take_left, take_right) = match (left.peek(), right.peek()) {
-            (Some(entry1), Some(entry2)) => {
-                (entry1.key() <= entry2.key(), entry1.key() >= entry2.key())
+    while let Some(timestamp) = entries
+        .iter_mut()
+        .filter_map(|entries| entries.peek().map(|entry| entry.key()))
+        .min()
+    {
+        timestamps.push(timestamp.format("%Y-%m-%d %H:%M:%S%.f UTC").to_string());
+
+        // Every row has one cell per log, even for missing or exhausted inputs.
+        for (entries, container) in entries.iter_mut().zip(&mut containers) {
+            if entries.peek().is_some_and(|entry| entry.key() == timestamp) {
+                container.push(entries.next().unwrap().get_log_message().to_owned());
+            } else {
+                container.push(String::from("\n"));
             }
-            (Some(_), None) => (true, false),
-            (None, Some(_)) => (false, true),
-            (None, None) => break,
-        };
-
-        let entry = if take_left {
-            left.peek().unwrap()
-        } else {
-            right.peek().unwrap()
-        };
-        timestamps.push(
-            entry
-                .timestamp
-                .format("%Y-%m-%d %H:%M:%S%.f UTC")
-                .to_string(),
-        );
-
-        left_container.push(if take_left {
-            left.next().unwrap().get_log_message().to_owned()
-        } else {
-            String::from("\n")
-        });
-        right_container.push(if take_right {
-            right.next().unwrap().get_log_message().to_owned()
-        } else {
-            String::from("\n")
-        });
+        }
     }
 
-    CompareResult::new(left_container, right_container, timestamps)
-        .expect("comparison appends one entry to each column per iteration")
+    CompareResult::new(containers, timestamps)
+        .expect("comparison appends one entry to every column per timestamp")
 }

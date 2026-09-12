@@ -1,11 +1,11 @@
 # logsync
 
-A small Rust terminal app for viewing two log files side by side, aligned by
+A small Rust terminal app for viewing multiple log files side by side, aligned by
 timestamp. Built with [tui-rs](https://github.com/fdehau/tui-rs) and
 [Crossterm](https://github.com/crossterm-rs/crossterm), with a deliberately simple
 codebase for learning.
 
-![logsync displaying two logs side by side with UTC timestamps, unmatched entries, and multiline errors](assets/image.png)
+![logsync displaying three logs side by side with UTC timestamps and unmatched entries](assets/image.png)
 
 ## Run
 
@@ -15,24 +15,27 @@ Install a current stable [Rust toolchain](https://rustup.rs/) supporting edition
 ```sh
 git clone https://github.com/bani2016up/logsync.git
 cd logsync
-cargo run --release -- /path/to/left.log /path/to/right.log
+cargo run --release -- /path/to/first.log /path/to/second.log /path/to/third.log
 ```
 
 Or install the binary from your local checkout:
 
 ```sh
 cargo install --path . --locked
-logsync /path/to/left.log /path/to/right.log
+logsync /path/to/first.log /path/to/second.log /path/to/third.log
 ```
 
-Pass exactly two file paths. There are currently no command-line flags.
+Pass two or more file paths. Each file gets a column labeled `Log 1`, `Log 2`,
+`Log 3`, and so on, in argument order. Two-file comparisons still work.
+There are currently no command-line flags. The screenshot above shows a
+three-log comparison.
 
 ## Controls
 
 | Input | Action |
 | --- | --- |
-| Up / Down | Scroll both logs by one aligned entry |
-| Left / Right | Scroll both message columns horizontally |
+| Up / Down | Scroll all logs by one aligned entry |
+| Left / Right | Scroll all message columns horizontally |
 | Vertical mouse wheel or touchpad scroll | Scroll vertically |
 | Horizontal mouse wheel or touchpad scroll | Scroll horizontally |
 | Shift + vertical wheel | Horizontal scrolling fallback |
@@ -43,7 +46,7 @@ touchpad support depends on the terminal forwarding the appropriate events.
 
 ## Log Format
 
-Both files must be UTF-8 and already sorted by timestamp (after UTC normalization).
+All files must be UTF-8 and already sorted by timestamp (after UTC normalization).
 The default selector detects a supported timestamp at the start of each line,
 optionally surrounded by square brackets. For example:
 
@@ -80,8 +83,11 @@ optionally surrounded by square brackets. For example:
   for every possible date notation.
 - Lines without a recognized timestamp attach to the previous entry, supporting
   multiline messages and tracebacks. Lines before the first entry are ignored.
-- Entries with equal timestamps are paired in encounter order. Unmatched entries
-  leave a blank on the other side.
+- Each row uses the earliest pending timestamp across all files. Entries with
+  that timestamp are aligned, and files without a matching entry get a blank.
+  Duplicate timestamps are paired in encounter order, one entry per file per row.
+- Multiline rows are padded to the tallest entry across all files so the next
+  entries remain aligned. Empty files keep their own blank columns.
 - ANSI escape sequences are stripped before parsing. Colored logs display as
   plain text; tabs become four spaces. Original files are not modified.
 
@@ -123,17 +129,33 @@ impl TimestampSelector for TaggedTimestampSelector {
 // let log = LogFile::from_file_with_selector(path, TaggedTimestampSelector);
 ```
 
-The two logs may use different selector types. `LogEntry` stores the parsed
-timestamp separately from its message body; `CompareResult` validates equal
-lengths for both message columns and the timestamp column. The renderer does
-not parse timestamp strings.
+Pass a vector of log references to compare any number of files:
+
+```rust
+let result = compare_logfiles(vec![&first, &second, &third]);
+```
+
+Comparison accepts inputs implementing `AsRef<[LogEntry]>`. For logs with
+different selector types, pass their entry slices without copying:
+
+```rust
+let result = compare_logfiles(vec![automatic.as_ref(), custom.as_ref()]);
+```
+
+`LogEntry` stores the parsed timestamp separately from its message body;
+`CompareResult::new(containers, timestamps)` validates equal lengths for every
+message column and the timestamp column. Its getters are read-only. Zero input
+columns are allowed only with an empty timestamp column. The renderer does not
+parse timestamp strings.
 
 ## Limitations
 
-- Both files and their aligned messages are held in memory; there is no live
+- All files and their aligned messages are held in memory; there is no live
   following or streaming mode.
 - Unreadable files or invalid UTF-8 currently cause an error panic.
 - Long lines are clipped, not wrapped; use horizontal scrolling to read them.
+- Log columns share the available terminal width. With many files, use a wider
+  terminal or compare fewer files if the panes become too narrow to read.
 - Vertical scrolling moves by entry. A multiline entry taller than the viewport
   cannot currently be scrolled internally to reveal its lower lines.
 - There is no search, filtering, clock-offset correction, or export yet.
@@ -144,7 +166,7 @@ not parse timestamp strings.
 src/
   main.rs                      Load files and launch the viewer
   application/
-    compare_logfiles.rs         Align the two logs
+    compare_logfiles.rs         Align all logs by timestamp
   domain/
     compare.rs                 Comparison-key trait
     compare_result.rs          Validated, read-only aligned columns
@@ -152,7 +174,7 @@ src/
     timestamp_selector.rs      Selector trait and automatic format detection
   tui/
     mod.rs                     Terminal setup, events, and cleanup
-    render.rs                  Three-column layout and drawing
+    render.rs                  Timestamp pane and dynamic log columns
     state.rs                   Vertical and horizontal scroll offsets
 ```
 

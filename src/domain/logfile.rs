@@ -20,6 +20,12 @@ impl LogEntry {
     }
 }
 
+impl<S: TimestampSelector> AsRef<[LogEntry]> for LogFile<S> {
+    fn as_ref(&self) -> &[LogEntry] {
+        &self.entities
+    }
+}
+
 impl LogFile<AutoTimestampSelector> {
     pub fn from_file(path: String) -> Self {
         Self::from_file_with_selector(path, AutoTimestampSelector)
@@ -90,9 +96,9 @@ mod tests {
             String::new(),
             "[2026-09-12T12:00:00.100+02:00] right\n2026/09/12 10:00:01 later",
         );
-        let result = compare_logfiles(&left, &right);
-        assert_eq!(result.left_container(), ["left", "extra", "\n"]);
-        assert_eq!(result.right_container(), ["right", "\n", "later"]);
+        let result = compare_logfiles(vec![&left, &right]);
+        assert_eq!(result.containers()[0], ["left", "extra", "\n"]);
+        assert_eq!(result.containers()[1], ["right", "\n", "later"]);
         assert_eq!(
             result.timestamps(),
             [
@@ -123,10 +129,10 @@ mod tests {
             CustomSelector,
         );
         let right = LogFile::from_source(String::new(), "2026-09-12 10:00:00 automatic");
-        let result = compare_logfiles(&left, &right);
+        let result = compare_logfiles(vec![left.as_ref(), right.as_ref()]);
         assert_eq!(result.length(), 1);
-        assert_eq!(result.left_container(), ["custom"]);
-        assert_eq!(result.right_container(), ["automatic"]);
+        assert_eq!(result.containers()[0], ["custom"]);
+        assert_eq!(result.containers()[1], ["automatic"]);
     }
 
     #[test]
@@ -138,9 +144,9 @@ mod tests {
 
         assert_eq!(right.entities.len(), 2);
         assert_eq!(left.entities[0].timestamp, right.entities[0].timestamp);
-        let result = compare_logfiles(&left, &right);
+        let result = compare_logfiles(vec![&left, &right]);
         assert_eq!(result.length(), 2);
-        assert_eq!(result.left_container(), result.right_container());
+        assert_eq!(result.containers()[0], result.containers()[1]);
     }
 
     #[test]
@@ -174,10 +180,10 @@ mod tests {
     fn aligns_matching_and_unmatched_entries() {
         let left = logfile(&[1, 3, 4], "L");
         let right = logfile(&[2, 3, 5], "R");
-        let result = compare_logfiles(&left, &right);
+        let result = compare_logfiles(vec![&left, &right]);
 
-        assert_eq!(result.left_container(), ["L1", "\n", "L3", "L4", "\n"]);
-        assert_eq!(result.right_container(), ["\n", "R2", "R3", "\n", "R5"]);
+        assert_eq!(result.containers()[0], ["L1", "\n", "L3", "L4", "\n"]);
+        assert_eq!(result.containers()[1], ["\n", "R2", "R3", "\n", "R5"]);
         assert_eq!(result.length(), 5);
         assert_eq!(left.entities.len(), 3);
         assert_eq!(right.entities.len(), 3);
@@ -187,27 +193,95 @@ mod tests {
     fn handles_empty_logs_and_remaining_entries_on_either_side() {
         let empty = logfile(&[], "");
         let populated = logfile(&[1, 2], "L");
-        let result = compare_logfiles(&empty, &empty);
-        assert!(result.left_container().is_empty());
-        assert!(result.right_container().is_empty());
+        let result = compare_logfiles(vec![&empty, &empty]);
+        assert!(result.containers()[0].is_empty());
+        assert!(result.containers()[1].is_empty());
         assert_eq!(result.length(), 0);
 
-        let result = compare_logfiles(&populated, &empty);
-        assert_eq!(result.left_container(), ["L1", "L2"]);
-        assert_eq!(result.right_container(), ["\n", "\n"]);
+        let result = compare_logfiles(vec![&populated, &empty]);
+        assert_eq!(result.containers()[0], ["L1", "L2"]);
+        assert_eq!(result.containers()[1], ["\n", "\n"]);
         assert_eq!(result.length(), 2);
 
-        let result = compare_logfiles(&empty, &populated);
-        assert_eq!(result.left_container(), ["\n", "\n"]);
-        assert_eq!(result.right_container(), ["L1", "L2"]);
+        let result = compare_logfiles(vec![&empty, &populated]);
+        assert_eq!(result.containers()[0], ["\n", "\n"]);
+        assert_eq!(result.containers()[1], ["L1", "L2"]);
         assert_eq!(result.length(), 2);
     }
 
     #[test]
     fn pairs_duplicate_timestamps_in_order() {
-        let result = compare_logfiles(&logfile(&[1, 1], "L"), &logfile(&[1], "R"));
-        assert_eq!(result.left_container(), ["L1", "L1"]);
-        assert_eq!(result.right_container(), ["R1", "\n"]);
+        let result = compare_logfiles(vec![&logfile(&[1, 1], "L"), &logfile(&[1], "R")]);
+        assert_eq!(result.containers()[0], ["L1", "L1"]);
+        assert_eq!(result.containers()[1], ["R1", "\n"]);
         assert_eq!(result.length(), 2);
+    }
+
+    #[test]
+    fn aligns_multiple_logs_with_duplicates_and_empty_inputs() {
+        let first = logfile(&[1, 3, 3, 6], "A");
+        let second = logfile(&[2, 3, 5], "B");
+        let third = logfile(&[1, 3, 3, 3, 7], "C");
+        let empty = logfile(&[], "");
+        let result = compare_logfiles(vec![&first, &second, &third, &empty]);
+
+        assert_eq!(result.length(), 8);
+        assert_eq!(
+            result.containers()[0],
+            ["A1", "\n", "A3", "A3", "\n", "\n", "A6", "\n"]
+        );
+        assert_eq!(
+            result.containers()[1],
+            ["\n", "B2", "B3", "\n", "\n", "B5", "\n", "\n"]
+        );
+        assert_eq!(
+            result.containers()[2],
+            ["C1", "\n", "C3", "C3", "C3", "\n", "\n", "C7"]
+        );
+        assert_eq!(result.containers()[3], vec!["\n"; 8]);
+        assert_eq!(
+            result.timestamps(),
+            [1, 2, 3, 3, 3, 5, 6, 7].map(|second| { format!("2026-09-12 00:00:{second:02} UTC") })
+        );
+    }
+
+    #[test]
+    fn compares_zero_single_and_all_empty_logs() {
+        let result = compare_logfiles(Vec::<&LogFile>::new());
+        assert!(result.containers().is_empty());
+        assert!(result.timestamps().is_empty());
+        assert_eq!(result.length(), 0);
+
+        let single = logfile(&[1, 2], "A");
+        let result = compare_logfiles(vec![&single]);
+        assert_eq!(result.containers().len(), 1);
+        assert_eq!(result.containers()[0], ["A1", "A2"]);
+        assert_eq!(result.length(), 2);
+
+        let empty = logfile(&[], "");
+        let result = compare_logfiles(vec![&empty; 4]);
+        assert_eq!(result.containers().len(), 4);
+        assert!(result.containers().iter().all(Vec::is_empty));
+        assert_eq!(result.length(), 0);
+    }
+
+    #[test]
+    fn preserves_duplicate_message_order_across_three_logs() {
+        let first = LogFile::from_source(
+            String::new(),
+            "2026-09-12 10:00:00 A-first\n2026-09-12 10:00:00 A-second",
+        );
+        let second = LogFile::from_source(String::new(), "2026-09-12 10:00:00 B-only");
+        let third = LogFile::from_source(
+            String::new(),
+            "2026-09-12 10:00:00 C-first\n2026-09-12 10:00:00 C-second\n2026-09-12 10:00:00 C-third",
+        );
+        let result = compare_logfiles(vec![&first, &second, &third]);
+
+        assert_eq!(result.length(), 3);
+        assert_eq!(result.containers()[0], ["A-first", "A-second", "\n"]);
+        assert_eq!(result.containers()[1], ["B-only", "\n", "\n"]);
+        assert_eq!(result.containers()[2], ["C-first", "C-second", "C-third"]);
+        assert_eq!(result.timestamps(), vec!["2026-09-12 10:00:00 UTC"; 3]);
     }
 }

@@ -2,7 +2,7 @@
 name = "logsync"
 version = "0.1.0"
 edition = "2024"
-description = "A simple terminal viewer for comparing two logs by timestamp"
+description = "A simple terminal viewer for comparing multiple logs by timestamp"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/bani2016up/logsync"
