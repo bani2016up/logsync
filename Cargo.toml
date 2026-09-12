@@ -1,0 +1,15 @@
+[package]
+name = "logsync"
+version = "0.1.0"
+edition = "2024"
+description = "A simple terminal viewer for comparing two logs by timestamp"
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/bani2016up/logsync"
+
+[dependencies]
+chrono = "0.4.45"
+crossterm = "0.29.0"
+regex = "1.13.1"
+strip-ansi-escapes = "0.2.1"
+tui = "0.19.0"
